@@ -2,58 +2,77 @@
 
 class AudioManager{
   constructor(){
-    this.audioContext = null;
-    this.audioSource = null;
-    this.analyzer = null;
-    this.audioStream = null;
+    this.streams = [];
   }
 
   async setupAudioSource(){
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const audioInputDevice = devices.find(d => d.kind === 'audioinput' && d.deviceId === 'communications');
+    const audioDevices = devices.filter(d => d.kind.indexOf('audio') !== -1);
 
-    if(!audioInputDevice){
+    if(!audioDevices.length === 0){
       throw new Error('No system audio input device found!');
     }
+
     try{
-      this.audioStream = await navigator.mediaDevices.getUserMedia({ 
-        video: false, 
-        audio: { 
-          deviceId: audioInputDevice.deviceId 
-        }
-      });
-
-      this.audioContext = new AudioContext();
-
-      this.analyzer = this.audioContext.createAnalyser();
-      this.analyzer.fftSize = 256;
-
-      this.audioSource = this.audioContext.createMediaStreamSource(this.audioStream);
-      this.audioSource.connect(this.analyzer);
-
+      await Promise.all(audioDevices.map(async d => {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ 
+          video: false, 
+          audio: { 
+            deviceId: d.deviceId 
+          }
+        });
+        const stream = new Stream(audioStream, d);
+        this.streams.push(stream);
+      }))
     } catch(e){
       throw e;
     }
   }
 
-  disposeStream(){
-    this.audioStream = null;
-    this.audioContext = null;
-    this.analyzer = null;
-    this.audioSource = null;
+  disposeStreams(){
+    this.streams.forEach(s => s.stream ? s.stream.getTracks().forEach(t => t.stop()) : null);
+    this.streams = [];
   }
 
   getAudioData(){
-    if (!this.audioStream || !this.audioContext || !this.analyzer || !this.audioSource){
+    
+    if (this.streams.length == 0){
+      throw new Error('Streams length is 0');
+    }
+    return this.streams.map(stream => ({
+      dataArray: stream.getData(),
+      deviceTitle: stream.device.label,
+      deviceKind: stream.device.kind,
+      deviceId: stream.device.deviceId
+    }));
+  }
+}
+
+class Stream{
+  constructor(stream: MediaStream, device: MediaDeviceInfo){
+    if (!stream)
+      throw new Error('Stream is not valid!');
+
+    this.device = device
+    this.stream = stream
+    this.audioContext = new AudioContext();
+    this.analyzer = this.audioContext.createAnalyser();
+    this.analyzer.fftSize = 256;
+    this.audioSource = this.audioContext.createMediaStreamSource(this.stream);
+    this.audioSource.connect(this.analyzer);
+
+  }
+
+  getData(){
+    if (!this.stream || !this.audioContext || !this.analyzer || !this.audioSource){
       throw new Error('Audio stream is not defined!');
     }
-
     let arr = new Uint8Array(256);
     this.analyzer.getByteTimeDomainData(arr);
-
     return arr;
   }
 }
+
 
 const audioManager = new AudioManager();
 
